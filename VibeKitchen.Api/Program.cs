@@ -78,7 +78,7 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
         client.Timeout = TimeSpan.FromSeconds(30);
 
         // Updated valid active flash models for 2026
-        string[] fallbackModels = { "gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.8-flash" };
+        string[] fallbackModels = = { "gemini-2.5-flash", "gemini-2.0-flash" };
         HttpResponseMessage response = null;
         string responseString = "";
         bool success = false;
