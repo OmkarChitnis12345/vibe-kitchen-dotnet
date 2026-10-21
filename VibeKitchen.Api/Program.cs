@@ -3,6 +3,10 @@ using System.Text.Json.Nodes;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Explicitly bind Kestrel to Cloud Run's injected PORT (defaults to 8080 locally)
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();
@@ -51,7 +55,7 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
         var apiKey = config["GeminiSettings:ApiKey"];
         if (string.IsNullOrEmpty(apiKey))
         {
-            Console.WriteLine("[VIBE KITCHEN ERROR] API Key is missing in appsettings.json!");
+            Console.WriteLine("[VIBE KITCHEN ERROR] API Key is missing in configuration!");
             return Results.StatusCode(500);
         }
 
@@ -85,7 +89,6 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
         var client = clientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(30);
 
-        // List of models to try in order of preference if a 503 capacity spike occurs
         string[] fallbackModels = { "gemini-3.5-flash", "gemini-2.0-flash", "gemini-1.5-flash" };
         
         HttpResponseMessage response = null;
