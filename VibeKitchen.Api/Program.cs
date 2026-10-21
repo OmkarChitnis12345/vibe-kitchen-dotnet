@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// CRITICAL FOR CLOUD RUN: Read the injected PORT environment variable and bind globally
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
@@ -12,12 +11,6 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();
 
 var app = builder.Build();
-
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -84,7 +77,8 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
         var client = clientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(30);
 
-        string[] fallbackModels = { "gemini-3.5-flash", "gemini-2.0-flash", "gemini-1.5-flash" };
+        // Updated valid active flash models for 2026
+        string[] fallbackModels = { "gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.8-flash" };
         HttpResponseMessage response = null;
         string responseString = "";
         bool success = false;
@@ -94,19 +88,25 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
             var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
             var content = new StringContent(payload.ToString(), System.Text.Encoding.UTF8, "application/json");
             
+            Console.WriteLine($"[VIBE KITCHEN] Trying model: {model}...");
             response = await client.PostAsync(url, content);
             responseString = await response.Content.ReadAsStringAsync();
 
             if (response.IsSuccessStatusCode)
             {
                 success = true;
+                Console.WriteLine($"[VIBE KITCHEN] Successfully generated using {model}!");
                 break;
+            }
+            else
+            {
+                Console.WriteLine($"[VIBE KITCHEN WARN] Model {model} failed with response: {responseString}");
             }
         }
 
         if (!success)
         {
-            return Results.Problem($"AI Error: All models are currently busy or unavailable.");
+            return Results.Problem($"AI Error: All models failed. Details: {responseString}");
         }
 
         var jsonResponse = JsonSerializer.Deserialize<JsonObject>(responseString);
