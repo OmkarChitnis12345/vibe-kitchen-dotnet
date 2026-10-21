@@ -1,158 +1,121 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-try
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+builder.Services.AddHttpClient();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
 {
-    var builder = WebApplication.CreateBuilder(args);
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
-    // Read Cloud Run's injected PORT environment variable (defaults to 8080 locally)
-    var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
-    
-    // Explicitly configure Kestrel to bind to all interfaces on the correct port
-    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
-    builder.Services.AddEndpointsApiExplorer();
-    builder.Services.AddSwaggerGen();
-    builder.Services.AddHttpClient();
+app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, IConfiguration config, HttpContext context) =>
+{
+    Console.WriteLine("\n[VIBE KITCHEN] Received incoming recipe generation request...");
 
-    var app = builder.Build();
-
-    if (app.Environment.IsDevelopment())
+    try
     {
-        app.UseSwagger();
-        app.UseSwaggerUI();
-    }
+        var form = await context.Request.ReadFormAsync();
+        var mood = form["mood"].ToString();
+        var file = form.Files["image"];
 
-    // Removed UseHttpsRedirection() since Cloud Run handles SSL termination at the load balancer
-    app.UseDefaultFiles();
-    app.UseStaticFiles();
-
-    app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, IConfiguration config, HttpContext context) =>
-    {
-        Console.WriteLine("\n[VIBE KITCHEN] Received incoming recipe generation request...");
-
-        try
+        if (file == null || file.Length == 0)
         {
-            var form = await context.Request.ReadFormAsync();
-            var mood = form["mood"].ToString();
-            var file = form.Files["image"];
+            return Results.BadRequest(new { error = "Please provide an image of your fridge contents!" });
+        }
 
-            if (file == null || file.Length == 0)
+        if (string.IsNullOrEmpty(mood))
+        {
+            mood = "Hungry and creative";
+        }
+
+        using var memoryStream = new MemoryStream();
+        await file.CopyToAsync(memoryStream);
+        var imageBytes = memoryStream.ToArray();
+        var base64Image = Convert.ToBase64String(imageBytes);
+        var mimeType = string.IsNullOrEmpty(file.ContentType) ? "image/jpeg" : file.ContentType;
+
+        var apiKey = config["GeminiSettings:ApiKey"];
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            return Results.StatusCode(500);
+        }
+
+        var promptText = $"You are an elite, witty chef who hates food waste. Look at this image of my fridge contents. The user's current mood is: '{mood}'. Generate a creative, step-by-step recipe utilizing these ingredients, add a funny chef's remark, and format it cleanly with Title, Ingredients, and Instructions.";
+
+        var payload = new JsonObject
+        {
+            ["contents"] = new JsonArray
             {
-                return Results.BadRequest(new { error = "Please provide an image of your fridge contents!" });
-            }
-
-            if (string.IsNullOrEmpty(mood))
-            {
-                mood = "Hungry and creative";
-            }
-
-            Console.WriteLine($"[VIBE KITCHEN] Image received: {file.FileName} ({file.Length} bytes)");
-            Console.WriteLine($"[VIBE KITCHEN] User Mood: '{mood}'");
-
-            using var memoryStream = new MemoryStream();
-            await file.CopyToAsync(memoryStream);
-            var imageBytes = memoryStream.ToArray();
-            var base64Image = Convert.ToBase64String(imageBytes);
-            var mimeType = string.IsNullOrEmpty(file.ContentType) ? "image/jpeg" : file.ContentType;
-
-            var apiKey = config["GeminiSettings:ApiKey"];
-            if (string.IsNullOrEmpty(apiKey))
-            {
-                Console.WriteLine("[VIBE KITCHEN ERROR] API Key is missing in configuration!");
-                return Results.StatusCode(500);
-            }
-
-            var promptText = $"You are an elite, witty chef who hates food waste. Look at this image of my fridge contents. The user's current mood is: '{mood}'. Generate a creative, step-by-step recipe utilizing these ingredients, add a funny chef's remark, and format it cleanly with Title, Ingredients, and Instructions.";
-
-            var payload = new JsonObject
-            {
-                ["contents"] = new JsonArray
+                new JsonObject
                 {
-                    new JsonObject
+                    ["parts"] = new JsonArray
                     {
-                        ["parts"] = new JsonArray
+                        new JsonObject
                         {
-                            new JsonObject
+                            ["text"] = promptText
+                        },
+                        new JsonObject
+                        {
+                            ["inline_data"] = new JsonObject
                             {
-                                ["text"] = promptText
-                            },
-                            new JsonObject
-                            {
-                                ["inline_data"] = new JsonObject
-                                {
-                                    ["mime_type"] = mimeType,
-                                    ["data"] = base64Image
-                                }
+                                ["mime_type"] = mimeType,
+                                ["data"] = base64Image
                             }
                         }
                     }
                 }
-            };
+            }
+        };
 
-            var client = clientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(30);
+        var client = clientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(30);
 
-            string[] fallbackModels = { "gemini-3.5-flash", "gemini-2.0-flash", "gemini-1.5-flash" };
+        string[] fallbackModels = { "gemini-3.5-flash", "gemini-2.0-flash", "gemini-1.5-flash" };
+        HttpResponseMessage response = null;
+        string responseString = "";
+        bool success = false;
+
+        foreach (var model in fallbackModels)
+        {
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
+            var content = new StringContent(payload.ToString(), System.Text.Encoding.UTF8, "application/json");
             
-            HttpResponseMessage response = null;
-            string responseString = "";
-            bool success = false;
+            response = await client.PostAsync(url, content);
+            responseString = await response.Content.ReadAsStringAsync();
 
-            foreach (var model in fallbackModels)
+            if (response.IsSuccessStatusCode)
             {
-                var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
-                var content = new StringContent(payload.ToString(), System.Text.Encoding.UTF8, "application/json");
-                
-                Console.WriteLine($"[VIBE KITCHEN] Dispatching request to model: {model}...");
-                response = await client.PostAsync(url, content);
-                responseString = await response.Content.ReadAsStringAsync();
-
-                if (response.IsSuccessStatusCode)
-                {
-                    success = true;
-                    Console.WriteLine($"[VIBE KITCHEN SUCCESS] Successfully generated recipe using {model}!");
-                    break;
-                }
-
-                Console.WriteLine($"[VIBE KITCHEN WARN] Model {model} returned status {(int)response.StatusCode}. Trying next fallback model...");
+                success = true;
+                break;
             }
-
-            if (!success)
-            {
-                Console.WriteLine($"\n==================== AI STUDIO ERROR ====================");
-                Console.WriteLine($"Status Code: {response?.StatusCode}");
-                Console.WriteLine($"Error Body: {responseString}");
-                Console.WriteLine($"=========================================================\n");
-
-                return Results.Problem($"AI Error: All models are currently busy or unavailable.");
-            }
-
-            var jsonResponse = JsonSerializer.Deserialize<JsonObject>(responseString);
-            var recipeText = jsonResponse?["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.ToString() 
-                             ?? "Could not extract recipe from AI response.";
-
-            return Results.Ok(new { recipe = recipeText });
         }
-        catch (TaskCanceledException ex)
+
+        if (!success)
         {
-            Console.WriteLine($"[VIBE KITCHEN TIMEOUT] {ex.Message}");
-            return Results.Problem("The request to Google AI Studio timed out.");
+            return Results.Problem($"AI Error: All models are currently busy or unavailable.");
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[VIBE KITCHEN EXCEPTION] {ex.Message}");
-            return Results.Problem($"Internal Server Error: {ex.Message}");
-        }
-    })
-    .DisableAntiforgery();
 
-    Console.WriteLine($"[VIBE KITCHEN] Starting web server and listening on port {port}...");
-    app.Run();
-}
-catch (Exception ex)
-{
-    Console.WriteLine($"[FATAL STARTUP CRASH] {ex.Message}");
-    Console.WriteLine(ex.StackTrace);
-    throw;
-}
+        var jsonResponse = JsonSerializer.Deserialize<JsonObject>(responseString);
+        var recipeText = jsonResponse?["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.ToString() 
+                         ?? "Could not extract recipe from AI response.";
+
+        return Results.Ok(new { recipe = recipeText });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Internal Server Error: {ex.Message}");
+    }
+})
+.DisableAntiforgery();
+
+app.Run();
