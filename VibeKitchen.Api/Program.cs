@@ -37,6 +37,9 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
             mood = "Hungry and creative";
         }
 
+        Console.WriteLine($"[VIBE KITCHEN] User Mood: '{mood}'");
+        Console.WriteLine($"[VIBE KITCHEN] Image received: {file.FileName} ({file.Length} bytes)");
+
         // Convert uploaded image to Base64
         using var memoryStream = new MemoryStream();
         await file.CopyToAsync(memoryStream);
@@ -82,8 +85,8 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
         var client = clientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(30);
 
-        // Resilient multi-model fallback loop for active flash models
-        string[] fallbackModels = { "gemini-2.5-flash", "gemini-flash-latest" };
+        // Resilient multi-model fallback loop
+        string[] fallbackModels = { "gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest" };
         HttpResponseMessage response = null;
         string responseString = "";
         bool success = false;
