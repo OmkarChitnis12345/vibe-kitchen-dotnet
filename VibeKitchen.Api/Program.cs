@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Bind explicitly to Cloud Run's dynamic PORT environment variable
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
@@ -12,6 +13,7 @@ builder.Services.AddHttpClient();
 
 var app = builder.Build();
 
+// Enable serving static files from wwwroot (Tailwind frontend)
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -35,16 +37,19 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
             mood = "Hungry and creative";
         }
 
+        // Convert uploaded image to Base64
         using var memoryStream = new MemoryStream();
         await file.CopyToAsync(memoryStream);
-        var imageBytes = memoryStream.ToArray();
-        var base64Image = Convert.ToBase64String(imageBytes);
+        var base64Image = Convert.ToBase64String(memoryStream.ToArray());
         var mimeType = string.IsNullOrEmpty(file.ContentType) ? "image/jpeg" : file.ContentType;
 
-        var apiKey = config["GeminiSettings:ApiKey"];
+        // Retrieve API Key from configuration or environment
+        var apiKey = config["GeminiSettings:ApiKey"] 
+                     ?? Environment.GetEnvironmentVariable("GeminiSettings__ApiKey");
+
         if (string.IsNullOrEmpty(apiKey))
         {
-            return Results.StatusCode(500);
+            return Results.Problem("Gemini API Key is not configured.");
         }
 
         var promptText = $"You are an elite, witty chef who hates food waste. Look at this image of my fridge contents. The user's current mood is: '{mood}'. Generate a creative, step-by-step recipe utilizing these ingredients, add a funny chef's remark, and format it cleanly with Title, Ingredients, and Instructions.";
@@ -77,8 +82,8 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
         var client = clientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(30);
 
-        // Updated valid active flash models for 2026
-        string[] fallbackModels = = { "gemini-2.5-flash", "gemini-2.0-flash" };
+        // Resilient multi-model fallback loop for active flash models
+        string[] fallbackModels = { "gemini-2.5-flash", "gemini-flash-latest" };
         HttpResponseMessage response = null;
         string responseString = "";
         bool success = false;
@@ -88,14 +93,14 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
             var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
             var content = new StringContent(payload.ToString(), System.Text.Encoding.UTF8, "application/json");
             
-            Console.WriteLine($"[VIBE KITCHEN] Trying model: {model}...");
+            Console.WriteLine($"[VIBE KITCHEN] Dispatching request to model: {model}...");
             response = await client.PostAsync(url, content);
             responseString = await response.Content.ReadAsStringAsync();
 
             if (response.IsSuccessStatusCode)
             {
                 success = true;
-                Console.WriteLine($"[VIBE KITCHEN] Successfully generated using {model}!");
+                Console.WriteLine($"[VIBE KITCHEN] Successfully generated recipe using {model}!");
                 break;
             }
             else
@@ -117,6 +122,7 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
     }
     catch (Exception ex)
     {
+        Console.WriteLine($"[VIBE KITCHEN ERROR] {ex.Message}");
         return Results.Problem($"Internal Server Error: {ex.Message}");
     }
 })
