@@ -86,7 +86,7 @@ app.MapPost("/api/recipe/generate", async (IHttpClientFactory clientFactory, ICo
         client.Timeout = TimeSpan.FromSeconds(30);
 
         // Resilient multi-model fallback loop
-        string[] fallbackModels = { "gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest" };
+        string[] fallbackModels = { "gemini-3.8-flash" };
         HttpResponseMessage response = null;
         string responseString = "";
         bool success = false;

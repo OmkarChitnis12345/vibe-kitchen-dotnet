@@ -35,3 +35,4 @@ C:\Users\acer\vibe-kitchen-dotnet\VibeKitchen.Api\obj\Debug\net10.0\VibeKitchen.
 C:\Users\acer\vibe-kitchen-dotnet\VibeKitchen.Api\obj\Debug\net10.0\ref\VibeKitchen.Api.dll
 C:\Users\acer\vibe-kitchen-dotnet\VibeKitchen.Api\bin\Debug\net10.0\VibeKitchen.Api.staticwebassets.runtime.json
 C:\Users\acer\vibe-kitchen-dotnet\VibeKitchen.Api\obj\Debug\net10.0\compressed\7ec8iqelqc-{0}-74tfnc8ydf-74tfnc8ydf.gz
+C:\Users\acer\vibe-kitchen-dotnet\VibeKitchen.Api\obj\Debug\net10.0\VibeKitchen.Api.sourcelink.json
